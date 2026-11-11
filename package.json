@@ -1,0 +1,18 @@
+{
+  "name": "miit-challenge",
+  "version": "1.0.0",
+  "description": "Technical analysis of the MIIT slider verification flow with a pure Node.js implementation.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "check": "node --check index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "chrome-remote-interface": "^0.34.0",
+    "pngjs": "^7.0.0"
+  },
+  "author": "tiny-jiu"
+}
