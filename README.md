@@ -1,56 +1,38 @@
-# MIIT Verification Flow — Technical Notes
+工信部备案验证绕过项目分析的页面中，滑块只是能直接看到的部分，并不是完整的验证流程。整个流程还包括 API 令牌、图片验证会话、坐标答案，以及验证成功后返回的签名，只有把这些状态连续串联起来，才能理解完整请求。
 
-The slider is the visible part of the MIIT verification page, but it is not the whole security model. The more interesting structure is the sequence around it: an API token, a challenge session, image coordinates, and a signed value produced by a successful check.
-
-## 1. Four separate layers
-
-The observed flow can be understood as four layers:
+实际请求会依次经过边缘防护、API 令牌、图片验证和业务签名：
 
 ```text
-Edge protection
-→ API token
-→ Image challenge
-→ Business signature
+边缘防护
+→ API 令牌
+→ 图片验证
+→ 业务签名
 ```
 
-The edge layer deals with browser traffic. The API layer expects a token obtained from `/api/auth`. The image layer issues a challenge and checks the answer. Finally, the business layer asks for a `sign` produced by a successful image check.
+边缘防护负责检查浏览器流量。API 层要求使用 `/api/auth` 返回的令牌。图片验证层下发题目并检查答案。最后，业务层要求提交图片验证成功后返回的 `sign`。
 
-These layers use different values, so obtaining one of them does not automatically satisfy the others.
+各层使用不同的数据，拿到其中一项并不代表已经满足其他层的要求。
 
-## 2. Token and challenge exchange
+认证请求包含 `authKey` 和 `timeStamp`。在当前代码中，`authKey` 是对固定字符串 `testtest` 与当前时间戳的拼接结果计算 MD5。
 
-The auth request contains `authKey` and `timeStamp`. In the examined build, the key is an MD5 value derived from a fixed account string, a fixed secret, and the current timestamp.
+响应中的 `bussiness` 是后续请求使用的令牌，其中包含时间信息。后续 API 请求通过 `token` 请求头携带它，因此首次获取令牌后仍需保留这项会话状态。
 
-The response contains a `bussiness` token. Its payload includes timing information, and later API requests carry it in the `token` header. This makes the token part of the request state rather than a value that can be omitted after the first call.
+图片验证请求会返回背景图、拼图块、UUID 和纵向位置。UUID 用来标识本次图片验证，提交答案时还要再次使用。
 
-The challenge request then returns the background, puzzle piece, UUID, and vertical position. The UUID identifies that particular image challenge and is needed again when the answer is submitted.
+这个拼图不需要复杂的视觉模型，主要依据是缺口与周围图像之间的亮度和纹理差异。
 
-## 3. What the image reveals
+代码会综合候选区域的平均亮度、左右相邻条带的平均亮度，以及候选区域内部的纹理变化进行评分。在已检查的样本中，较亮且相对平坦的缺口会形成明显的分数峰值。代码先合并邻近峰值，再用小范围 Sobel 计算将结果对齐到纵向边缘。
 
-The puzzle does not require a complicated vision model. Its useful feature is the contrast between the gap and the surrounding image.
+这里采用的是局部统计特征，而不是固定图片模板。背景图可以变化，但缺口与紧邻区域之间的关系仍然可用。
 
-A candidate window can be scored using three observations:
+提交的横坐标使用图片自身的坐标系。响应还依赖本次验证的 UUID，因此图片答案和验证会话不能分开处理。
 
-- how bright the window is
-- how bright its neighboring strips are
-- how much texture variation exists inside it
+`checkImage` 成功后会返回签名。这个签名不仅表示图片答案正确，还把答案与本次验证的 UUID 关联起来，证明完成的是这一次验证。
 
-In the samples examined, a bright and relatively flat gap produces a useful peak. Nearby peaks can be grouped before a small Sobel pass aligns the result with a vertical edge.
+因此，验证码是整个授权流程中的一环。签名属于当前会话，不是可以脱离会话重复使用的固定答案。
 
-The important analytical step is to look at local statistics rather than search for a fixed image template. Backgrounds change, but the relationship between the gap and its immediate surroundings remains useful.
+理解这套流程时，应先拆开各项状态，再把完整请求串起来。令牌签发、图片分析和签名校验可以分别检查，最后按实际顺序观察它们如何衔接。
 
-The submitted horizontal coordinate is in the image's own coordinate space. The response also depends on the challenge UUID, so the image answer and the challenge session cannot be treated independently.
+浏览器上下文同样重要。Cookie、`token` 请求头和图片验证参数属于同一次会话。把不同运行过程中的字段拼在一起，会破坏请求之间的关联。
 
-## 4. The role of the signature
-
-A successful `checkImage` response returns a signed value. Its importance is not limited to the image result: it connects the answer to the challenge UUID and provides proof that this particular challenge was completed.
-
-This is where the CAPTCHA becomes part of a wider authorization flow. The signed response belongs to the active session rather than acting as a reusable answer to an isolated puzzle.
-
-## 5. The useful analytical approach
-
-The cleanest way to understand the system is to separate its state instead of trying to solve everything at once. Token issuance, image analysis, and signature validation can be examined independently, then followed as one continuous exchange.
-
-Browser context also matters. Cookies, token headers, and challenge values belong to the same session. Replaying isolated fields from different runs loses the relationships that make the request coherent.
-
-The central observation is that the image itself is only one link. The complete verification depends on preserving the sequence from auth to challenge and from challenge to signature.
+图片识别只是其中一步。完整验证必须保持从认证到获取图片、再从提交答案到取得签名的连续过程。

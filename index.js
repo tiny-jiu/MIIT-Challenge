@@ -67,10 +67,10 @@ function findGap(backgroundBuffer, pieceBuffer, height) {
     const pieceWidth = piece.width;
     const pieceHeight = piece.height;
     if (height < 0 || height + pieceHeight > background.height) {
-        throw new Error('The puzzle height falls outside the background image.');
+        throw new Error('拼图高度超出背景图片范围。');
     }
     if (pieceWidth > background.width) {
-        throw new Error('The puzzle piece is wider than the background image.');
+        throw new Error('拼图块宽度大于背景图片宽度。');
     }
 
     const candidates = [];
@@ -118,7 +118,7 @@ function browserPath() {
         'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
     ].filter(Boolean);
     const executable = candidates.find(candidate => fs.existsSync(candidate));
-    if (!executable) throw new Error('Chrome or Edge was not found. Set CHROME_PATH to a Chromium-based browser.');
+    if (!executable) throw new Error('未找到 Chrome 或 Edge。请通过 CHROME_PATH 指定 Chromium 内核浏览器的路径。');
     return executable;
 }
 
@@ -154,13 +154,13 @@ async function startBrowser() {
                 const targets = await CDP.List({ port, host: '127.0.0.1' });
                 const target = targets.find(item => item.type === 'page' && item.url.includes('beian'));
                 if (target) {
-                    console.log(`Browser started on CDP port ${port}.`);
+                    console.log(`浏览器已启动，CDP 端口为 ${port}。`);
                     return { browser, profile, port, target };
                 }
             } catch (_) {}
             await sleep(500);
         }
-        throw new Error('The MIIT page did not become ready on the CDP endpoint.');
+        throw new Error('等待超时，工信部页面尚未在 CDP 端点就绪。');
     } catch (error) {
         browser.kill();
         try { fs.rmSync(profile, { recursive: true, force: true }); } catch (_) {}
@@ -180,7 +180,7 @@ async function main() {
             expression: `JSON.stringify((function(){const image=document.querySelector('#bgImg');return image?{natural:image.naturalWidth,client:image.clientWidth}:{noImg:true}})())`,
             returnByValue: true,
         });
-        console.log(`Background dimensions: ${dimensions.result.value}`);
+        console.log(`背景图片尺寸：${dimensions.result.value}`);
 
         const timestamp = Date.now();
         const authKey = crypto.createHash('md5').update(`testtest${timestamp}`).digest('hex');
@@ -196,19 +196,19 @@ async function main() {
             returnByValue: true,
         });
         if (typeof auth.result.value !== 'string') {
-            throw new Error(`Unexpected auth evaluation result: ${JSON.stringify(auth.result).slice(0, 1000)}`);
+            throw new Error(`认证返回结果异常：${JSON.stringify(auth.result).slice(0, 1000)}`);
         }
         const authResponse = JSON.parse(auth.result.value);
         let authData = null;
         try { authData = JSON.parse(authResponse.body); } catch (_) {}
         const safeAuthBody = authData
-            ? JSON.stringify(authData).replace(/"(bussiness|refresh|refreshToken|token|sign)"\s*:\s*"[^"]*"/g, '"$1":"<redacted>"')
+            ? JSON.stringify(authData).replace(/"(bussiness|refresh|refreshToken|token|sign)"\s*:\s*"[^"]*"/g, '"$1":"<已隐藏>"')
             : authResponse.body.slice(0, 1000);
         const token = authData?.params && typeof authData.params.bussiness === 'string'
             ? authData.params.bussiness.trim()
             : '';
-        if (!token) throw new Error(`Auth failed: HTTP ${authResponse.status} ${safeAuthBody}`);
-        console.log('Token acquired.');
+        if (!token) throw new Error(`认证失败：HTTP ${authResponse.status} ${safeAuthBody}`);
+        console.log('已获取令牌。');
         await sleep(5000);
 
         const challenge = await Runtime.evaluate({
@@ -222,20 +222,20 @@ async function main() {
             returnByValue: true,
         });
         const challengeData = JSON.parse(challenge.result.value);
-        if (!challengeData.params) throw new Error(`Challenge request failed: ${challenge.result.value.slice(0, 200)}`);
+        if (!challengeData.params) throw new Error(`图片验证请求失败：${challenge.result.value.slice(0, 200)}`);
 
         const backgroundBuffer = Buffer.from(challengeData.params.bigImage, 'base64');
         const pieceBuffer = Buffer.from(challengeData.params.smallImage, 'base64');
         fs.writeFileSync(path.join(OUT_DIR, 'attempt_big.png'), backgroundBuffer);
         fs.writeFileSync(path.join(OUT_DIR, 'attempt_small.png'), pieceBuffer);
-        console.log(`Challenge acquired. uuid=${challengeData.params.uuid} height=${challengeData.params.height}`);
+        console.log(`已获取图片验证，uuid=${challengeData.params.uuid}，height=${challengeData.params.height}`);
         await sleep(5000);
 
         const detection = findGap(backgroundBuffer, pieceBuffer, challengeData.params.height);
-        console.log(`RESULT value=${detection.value} gap_x=${detection.gapX} score=${detection.score.toFixed(1)}`);
+        console.log(`识别结果：value=${detection.value}，gap_x=${detection.gapX}，score=${detection.score.toFixed(1)}`);
         const offset = Number.parseInt(process.env.OFFSET || '0', 10);
         const value = String(detection.value + offset);
-        if (offset) console.log(`Applying an offset of ${offset}px. Submitted value=${value}.`);
+        if (offset) console.log(`应用 ${offset}px 偏移，提交 value=${value}。`);
         await sleep(5000);
 
         const submission = await Runtime.evaluate({
@@ -248,7 +248,7 @@ async function main() {
             awaitPromise: true,
             returnByValue: true,
         });
-        console.log(`checkImage value=${value} response=${submission.result.value}`);
+        console.log(`checkImage 提交结果：value=${value}，响应=${submission.result.value}`);
         fs.appendFileSync(
             path.join(OUT_DIR, 'attempts.log'),
             `${new Date().toISOString()} value=${value} uuid=${challengeData.params.uuid} -> ${submission.result.value}\n`,

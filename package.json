@@ -1,7 +1,7 @@
 {
   "name": "miit-challenge",
   "version": "1.0.0",
-  "description": "Technical analysis of the MIIT slider verification flow with a pure Node.js implementation.",
+  "description": "使用 Node.js 和 Chrome 开发者工具协议分析工信部备案滑块验证流程。",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
